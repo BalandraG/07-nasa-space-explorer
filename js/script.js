@@ -509,6 +509,7 @@ async function fetchApodRange(startDate, endDate) {
   updateDatesNotAppliedIndicator();
 
   const dates = getDatesInRange(startDate, endDate);
+  let hadRequestFailure = false;
 
   try {
     const settled = await Promise.all(
@@ -519,6 +520,7 @@ async function fetchApodRange(startDate, endDate) {
           if (error.name === 'AbortError') {
             throw error;
           }
+          hadRequestFailure = true;
           console.warn(error.message || error);
           return null;
         }
@@ -535,9 +537,18 @@ async function fetchApodRange(startDate, endDate) {
 
     if (entries.length === 0) {
       appState.status = 'error';
-      appState.errorMessage = appState.entries.length
-        ? 'Could not load that date range. Your previous results are still shown.'
-        : 'No Astronomy Pictures were available for that date range. Try different dates.';
+      if (appState.entries.length) {
+        appState.errorMessage = 'Could not load that date range. Your previous results are still shown.';
+      } else if (!navigator.onLine) {
+        appState.errorMessage =
+          'You are offline and this date range has no cached APOD data. Reconnect or try a previously loaded date range.';
+      } else if (hadRequestFailure) {
+        appState.errorMessage =
+          'Could not retrieve APOD data for that date range. Check your connection or try again.';
+      } else {
+        appState.errorMessage =
+          'No Astronomy Pictures were available for that date range. Try different dates.';
+      }
       renderStatus();
       updateDatesNotAppliedIndicator();
       return;
@@ -552,8 +563,12 @@ async function fetchApodRange(startDate, endDate) {
     appState.focusIndex = 0;
     appState.visibleCount = GALLERY_PAGE_SIZE;
     appState.expandedSummaryDate = null;
-    appState.status = 'success';
-    appState.errorMessage = null;
+    appState.status = hadRequestFailure ? 'error' : 'success';
+    appState.errorMessage = hadRequestFailure
+      ? navigator.onLine
+        ? 'Some APOD dates could not be retrieved. Showing the dates that were available.'
+        : 'You are offline. Showing available cached APOD data; reconnect to load the remaining dates.'
+      : null;
 
     clearValidationError();
     renderStatus();
@@ -2699,3 +2714,188 @@ fetchApodRange(startInput.value, endInput.value);
     isVideoEntry
   };
 })();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    const appScope = new URL('./', document.baseURI);
+    navigator.serviceWorker
+      .register(new URL('service-worker.js', appScope), { scope: appScope.pathname })
+      .then((registration) => {
+        console.log("[App] Service worker registered:", registration.scope);
+      })
+      .catch((error) => {
+        console.error("[App] Service worker registration failed:", error);
+      });
+  });
+}
+
+const offlineBanner = document.getElementById('offline-banner');
+
+function updateOnlineStatus() {
+  if (navigator.onLine) {
+    offlineBanner.classList.add('hidden');
+  } else {
+    offlineBanner.classList.remove('hidden');
+  }
+}
+
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
+// ----- Installation and notification controls -----
+let deferredInstallPrompt = null;
+const installBanner = document.getElementById('install-banner');
+const installYesButton = document.getElementById('install-yes');
+const installDismissButton = document.getElementById('install-dismiss');
+const installMessage = document.getElementById('install-message');
+const notificationButton = document.getElementById('notification-button');
+const notificationStatus = document.getElementById('notification-status');
+const INSTALL_DISMISSED_KEY = 'nasa-space-explorer-install-dismissed';
+let installPromptDismissedInMemory = false;
+let appIsInstalled =
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+  navigator.standalone === true;
+
+function isIosDevice() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function hasDismissedInstallPrompt() {
+  try {
+    return installPromptDismissedInMemory ||
+      window.sessionStorage.getItem(INSTALL_DISMISSED_KEY) === 'true';
+  } catch (error) {
+    console.warn('[App] Unable to read install prompt dismissal state:', error);
+    return installPromptDismissedInMemory;
+  }
+}
+
+function dismissInstallPromptForSession() {
+  installPromptDismissedInMemory = true;
+  try {
+    window.sessionStorage.setItem(INSTALL_DISMISSED_KEY, 'true');
+  } catch (error) {
+    console.warn('[App] Unable to save install prompt dismissal state:', error);
+  }
+  deferredInstallPrompt = null;
+  installBanner.classList.add('hidden');
+}
+
+function showInstallInstructions(message, canPrompt = false) {
+  installMessage.textContent = message;
+  installYesButton.hidden = !canPrompt;
+  installBanner.classList.remove('hidden');
+}
+
+function handleAppInstalled() {
+  appIsInstalled = true;
+  deferredInstallPrompt = null;
+  installBanner.classList.add('hidden');
+}
+
+if (appIsInstalled || hasDismissedInstallPrompt()) {
+  installBanner.classList.add('hidden');
+} else if (isIosDevice()) {
+  showInstallInstructions(
+    'To install on iPhone or iPad, tap Share in your browser, then choose Add to Home Screen.'
+  );
+}
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  if (appIsInstalled || hasDismissedInstallPrompt()) {
+    return;
+  }
+  deferredInstallPrompt = event;
+  showInstallInstructions('Install the app on your device for quick access.', true);
+});
+
+installYesButton.addEventListener('click', async () => {
+  if (!deferredInstallPrompt || appIsInstalled) {
+    return;
+  }
+
+  const installPrompt = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  installYesButton.disabled = true;
+
+  try {
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    console.log(`[App] Install prompt outcome: ${outcome}`);
+
+    if (outcome === 'accepted') {
+      handleAppInstalled();
+    } else {
+      dismissInstallPromptForSession();
+    }
+  } catch (error) {
+    console.error('[App] Unable to show the installation prompt:', error);
+    installBanner.classList.add('hidden');
+  } finally {
+    installYesButton.disabled = false;
+  }
+});
+
+installDismissButton.addEventListener('click', dismissInstallPromptForSession);
+window.addEventListener('appinstalled', handleAppInstalled);
+
+function updateNotificationStatus(permission = null) {
+  if (!window.isSecureContext) {
+    notificationStatus.textContent = 'Notifications require a secure HTTPS connection.';
+    notificationButton.disabled = true;
+    return;
+  }
+
+  if (typeof window.Notification === 'undefined') {
+    notificationStatus.textContent = 'Notifications are not supported by this browser.';
+    notificationButton.disabled = true;
+    return;
+  }
+
+  const currentPermission = permission || window.Notification.permission;
+  if (currentPermission === 'granted') {
+    notificationStatus.textContent =
+      'Notification permission is allowed. This app does not currently send notifications.';
+    notificationButton.disabled = true;
+  } else if (currentPermission === 'denied') {
+    notificationStatus.textContent =
+      'Notifications are blocked. Change this site’s permission in your browser settings to allow them.';
+    notificationButton.disabled = true;
+  } else {
+    notificationStatus.textContent = 'Notifications have not been enabled.';
+    notificationButton.disabled = false;
+  }
+}
+
+notificationButton.addEventListener('click', async () => {
+  if (!window.isSecureContext) {
+    updateNotificationStatus();
+    return;
+  }
+
+  if (typeof window.Notification === 'undefined') {
+    updateNotificationStatus();
+    return;
+  }
+
+  if (window.Notification.permission !== 'default') {
+    updateNotificationStatus();
+    return;
+  }
+
+  notificationButton.disabled = true;
+  try {
+    const permission = await window.Notification.requestPermission();
+    updateNotificationStatus(permission);
+  } catch (error) {
+    console.error('[App] Unable to request notification permission:', error);
+    notificationStatus.textContent =
+      'The browser could not request notification permission. Check your site settings and try again.';
+    notificationButton.disabled = false;
+  }
+});
+
+updateNotificationStatus();

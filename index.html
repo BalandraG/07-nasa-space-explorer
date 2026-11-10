@@ -8,8 +8,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link href="style.css" rel="stylesheet" type="text/css" />
+  <link rel="manifest" href="js/manifest.json" />
+  <meta name="theme-color" content="#0b3d91" />
+  <link rel="apple-touch-icon" href="icons/icons-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
 </head>
 <body>
+  <div id="offline-banner" class="offline-banner hidden" role="status" aria-live="polite" aria-atomic="true">
+    You're offline. Previously cached app content and APOD dates may still be available.
+  </div>
   <a class="skip-link" href="#main-content">Skip to main content</a>
 
   <header class="site-header" id="site-header">
@@ -270,6 +277,24 @@
         Independent student project using NASA’s public APOD API.
         Not affiliated with or endorsed by NASA.
       </p>
+    </div>
+    <div class="section-inner pwa-tools">
+      <section id="install-banner" class="pwa-option install-banner hidden" aria-labelledby="install-heading">
+        <h2 id="install-heading">Install NASA Space Explorer</h2>
+        <p id="install-message"></p>
+        <div class="pwa-actions">
+          <button type="button" id="install-yes" class="btn btn-primary" hidden>Install</button>
+          <button type="button" id="install-dismiss" class="btn btn-secondary">Not now</button>
+        </div>
+      </section>
+
+      <section class="pwa-option" aria-labelledby="notification-heading">
+        <h2 id="notification-heading">Notifications</h2>
+        <p id="notification-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <button type="button" id="notification-button" class="btn btn-secondary">
+          Enable notifications
+        </button>
+      </section>
     </div>
   </footer>
 
